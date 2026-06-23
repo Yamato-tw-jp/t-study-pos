@@ -1311,11 +1311,39 @@ function sendStaticFile(response, pathname) {
     });
 }
 
+function sendPublicAsset(response, filename) {
+    const filePath = path.join(publicDir, filename);
+
+    fs.readFile(filePath, (error, content) => {
+        if (error) {
+            response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            response.end('Not found');
+            return;
+        }
+
+        response.writeHead(200, {
+            'Content-Type': mimeTypes[path.extname(filePath)] || 'application/octet-stream',
+            'Cache-Control': 'no-store'
+        });
+        response.end(content);
+    });
+}
+
 const server = http.createServer((request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
 
     if (url.pathname.startsWith('/api/')) {
         handleApi(request, response, url.pathname);
+        return;
+    }
+
+    if (url.pathname === '/style.css') {
+        sendPublicAsset(response, 'style.css');
+        return;
+    }
+
+    if (url.pathname === '/script.js') {
+        sendPublicAsset(response, 'script.js');
         return;
     }
 
