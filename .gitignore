@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+node_modules/
+npm-debug.log*
+
+# Local test artifacts and temporary files
+work/
+outputs/
+
+# Firebase / service account secrets
+serviceAccountKey.json
+firebase-adminsdk*.json
+*.pem

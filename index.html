@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生徒用マイページ - 塾システム</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body class="is-locked">
+    <section class="login-screen" id="login-screen" aria-labelledby="login-title">
+        <form class="login-card" id="login-form">
+            <div class="login-brand">T-Study POS</div>
+            <h1 id="login-title">ログイン</h1>
+            <p>生徒IDまたは教師IDとパスワードを入力してください。</p>
+
+            <label for="student-id">ID</label>
+            <input id="student-id" name="studentId" type="text" autocomplete="username" required>
+
+            <label for="student-password">パスワード</label>
+            <input id="student-password" name="password" type="password" autocomplete="current-password" required>
+
+            <p class="login-error" id="login-error" role="alert"></p>
+            <button class="login-button" type="submit">ログイン</button>
+        </form>
+    </section>
+
+    <aside class="sidebar" id="sidebar" aria-hidden="true">
+        <div class="logo">
+            <h2 id="app-title"></h2>
+        </div>
+        <nav class="menu" aria-label="メインメニュー">
+            <ul id="sidebar-menu"></ul>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <header class="top-header">
+            <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="メニューを開閉">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <div>
+                <h1 id="greeting"></h1>
+                <p class="page-subtitle" id="page-subtitle"></p>
+            </div>
+            <div class="header-actions">
+                <div class="user-info" id="user-goal"></div>
+                <button class="logout-button" id="logout-button" type="button">ログアウト</button>
+            </div>
+        </header>
+
+        <div id="view-root"></div>
+    </main>
+</body>
+</html>
