@@ -309,10 +309,12 @@ function createAssignmentCard(assignment) {
     header.append(titleBlock, createAssignmentStatus(assignment.status));
     card.append(header, instructions);
 
-    if (assignment.photoDataUrl) {
+    const photoSrc = assignment.photoUrl || assignment.photoDataUrl;
+
+    if (photoSrc) {
         const image = document.createElement('img');
         image.className = 'assignment-photo';
-        image.src = assignment.photoDataUrl;
+        image.src = photoSrc;
         image.alt = `${assignment.title}の提出写真`;
         card.append(image);
     }
@@ -829,10 +831,12 @@ function createTeacherAssignmentCard(assignment) {
         card.append(createElement('p', 'assignment-meta', `提出日時：${assignment.submittedAt}`));
     }
 
-    if (assignment.photoDataUrl) {
+    const photoSrc = assignment.photoUrl || assignment.photoDataUrl;
+
+    if (photoSrc) {
         const image = document.createElement('img');
         image.className = 'assignment-photo';
-        image.src = assignment.photoDataUrl;
+        image.src = photoSrc;
         image.alt = `${assignment.studentName}の提出写真`;
         card.append(image);
     }

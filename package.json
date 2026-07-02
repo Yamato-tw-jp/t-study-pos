@@ -5,5 +5,7 @@
   "scripts": {
     "start": "node server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
 }

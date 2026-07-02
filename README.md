@@ -37,4 +37,22 @@ http://127.0.0.1:4173
 
 現在は試作用のメモリ保存です。サーバーを再起動すると、画面から追加したデータは初期状態に戻ります。
 
-本番化では Firebase Firestore と Cloud Storage for Firebase へ移行する予定です。Firebaseのサービスアカウント鍵や `.env` はGitHubに公開しないでください。
+Firebase環境変数を設定すると、FirestoreとCloud Storage for Firebaseに保存します。Firebaseのサービスアカウント鍵や `.env` はGitHubに公開しないでください。
+
+## Firebase設定
+
+Renderの `Environment` に以下を設定します。
+
+```text
+FIREBASE_PROJECT_ID=FirebaseプロジェクトID
+FIREBASE_STORAGE_BUCKET=Firebase Storageのbucket名
+FIREBASE_SERVICE_ACCOUNT_BASE64=サービスアカウントJSONをbase64化した文字列
+```
+
+ローカルでbase64化する例:
+
+```bash
+base64 -i serviceAccountKey.json | pbcopy
+```
+
+Firestoreには `tStudyPos/primary` ドキュメントとして生徒・教師データを保存します。課題写真は `assignment-submissions/{studentId}/{assignmentId}/...` に保存し、FirestoreにはStorageパスと表示用URLを保存します。

@@ -3,6 +3,14 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
+let firebaseAdmin = null;
+
+try {
+    firebaseAdmin = require('firebase-admin');
+} catch {
+    // Firebase is optional locally. Render will install firebase-admin from package.json.
+}
+
 const PORT = Number(process.env.PORT || 4173);
 const SESSION_COOKIE = 'tstudy_sid';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -13,6 +21,7 @@ const PBKDF2_DIGEST = 'sha512';
 
 const publicDir = __dirname;
 const sessions = new Map();
+const firebase = initializeFirebase();
 
 const appConfig = {
     appTitle: 'T-Study POS',
@@ -230,6 +239,93 @@ const mimeTypes = {
     '.svg': 'image/svg+xml',
     '.webp': 'image/webp'
 };
+
+const DATA_COLLECTION = 'tStudyPos';
+const DATA_DOCUMENT = 'primary';
+
+async function loadPersistedData() {
+    if (!firebase.enabled || !firebase.db) {
+        return;
+    }
+
+    const snapshot = await firebase.db.collection(DATA_COLLECTION).doc(DATA_DOCUMENT).get();
+
+    if (!snapshot.exists) {
+        await saveDataStore();
+        return;
+    }
+
+    const data = snapshot.data() || {};
+
+    if (Array.isArray(data.students)) {
+        students.splice(0, students.length, ...data.students);
+    }
+
+    if (Array.isArray(data.teachers)) {
+        teachers.splice(0, teachers.length, ...data.teachers);
+    }
+}
+
+async function saveDataStore() {
+    if (!firebase.enabled || !firebase.db) {
+        return;
+    }
+
+    await firebase.db.collection(DATA_COLLECTION).doc(DATA_DOCUMENT).set({
+        students,
+        teachers,
+        updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+}
+
+function getFirebaseServiceAccount() {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        const json = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8');
+        return JSON.parse(json);
+    }
+
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    }
+
+    return null;
+}
+
+function initializeFirebase() {
+    if (!firebaseAdmin) {
+        return { enabled: false, db: null, bucket: null };
+    }
+
+    const serviceAccount = getFirebaseServiceAccount();
+    const storageBucket = process.env.FIREBASE_STORAGE_BUCKET;
+    const hasApplicationCredentials = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+    if (!serviceAccount && !hasApplicationCredentials) {
+        return { enabled: false, db: null, bucket: null };
+    }
+
+    const options = {
+        credential: serviceAccount
+            ? firebaseAdmin.credential.cert(serviceAccount)
+            : firebaseAdmin.credential.applicationDefault()
+    };
+
+    if (process.env.FIREBASE_PROJECT_ID) {
+        options.projectId = process.env.FIREBASE_PROJECT_ID;
+    }
+
+    if (storageBucket) {
+        options.storageBucket = storageBucket;
+    }
+
+    firebaseAdmin.initializeApp(options);
+
+    return {
+        enabled: true,
+        db: firebaseAdmin.firestore(),
+        bucket: storageBucket ? firebaseAdmin.storage().bucket() : null
+    };
+}
 
 function sendJson(response, statusCode, data, extraHeaders = {}) {
     response.writeHead(statusCode, {
@@ -718,6 +814,69 @@ function getTargetStudents(targetStudentId) {
         : students.filter((student) => student.id === targetStudentId);
 }
 
+function parseDataUrl(dataUrl) {
+    const match = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+
+    if (!match) {
+        return null;
+    }
+
+    return {
+        contentType: match[1],
+        buffer: Buffer.from(match[2], 'base64')
+    };
+}
+
+function getImageExtension(contentType) {
+    const extensions = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif'
+    };
+
+    return extensions[contentType] || 'jpg';
+}
+
+async function storeAssignmentPhoto(studentId, assignmentId, photoDataUrl) {
+    if (!firebase.enabled || !firebase.bucket) {
+        return {
+            photoDataUrl,
+            photoStoragePath: '',
+            photoUrl: ''
+        };
+    }
+
+    const parsed = parseDataUrl(photoDataUrl);
+
+    if (!parsed) {
+        throw new Error('Invalid image data.');
+    }
+
+    const extension = getImageExtension(parsed.contentType);
+    const storagePath = `assignment-submissions/${studentId}/${assignmentId}/${Date.now()}.${extension}`;
+    const file = firebase.bucket.file(storagePath);
+
+    await file.save(parsed.buffer, {
+        metadata: {
+            contentType: parsed.contentType,
+            cacheControl: 'private, max-age=3600'
+        }
+    });
+
+    const [photoUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: '2500-01-01'
+    });
+
+    return {
+        photoDataUrl: '',
+        photoStoragePath: storagePath,
+        photoUrl
+    };
+}
+
 function createTeacherAssignment(payload) {
     const targetStudentId = normalizeText(payload.targetStudentId, 40);
     const assignment = {
@@ -753,7 +912,7 @@ function createTeacherAssignment(payload) {
     return { sentCount: targetStudents.length };
 }
 
-function submitAssignment(student, assignmentId, payload) {
+async function submitAssignment(student, assignmentId, payload) {
     const assignment = findAssignment(student, assignmentId);
     const photoDataUrl = normalizeText(payload.photoDataUrl, JSON_BODY_LIMIT_BYTES);
 
@@ -765,9 +924,19 @@ function submitAssignment(student, assignmentId, payload) {
         return '課題写真を選択してください。';
     }
 
+    let photoResult;
+
+    try {
+        photoResult = await storeAssignmentPhoto(student.id, assignmentId, photoDataUrl);
+    } catch {
+        return '課題写真の保存に失敗しました。';
+    }
+
     assignment.status = 'submitted';
     assignment.submittedAt = formatSubmittedAt();
-    assignment.photoDataUrl = photoDataUrl;
+    assignment.photoDataUrl = photoResult.photoDataUrl;
+    assignment.photoStoragePath = photoResult.photoStoragePath;
+    assignment.photoUrl = photoResult.photoUrl;
     assignment.evaluation = '';
     assignment.feedback = '';
 
@@ -918,6 +1087,7 @@ async function handleApi(request, response, pathname) {
                 return;
             }
 
+            await saveDataStore();
             sendJson(response, 200, {
                 app: getAppForRole('student'),
                 role: 'student',
@@ -966,6 +1136,7 @@ async function handleApi(request, response, pathname) {
             }
 
             Object.assign(student, createPasswordRecord(newPassword));
+            await saveDataStore();
             sendJson(response, 200, { ok: true }, {
                 'Set-Cookie': makeSessionCookie(session.sessionId)
             });
@@ -1021,6 +1192,7 @@ async function handleApi(request, response, pathname) {
                 event: title
             });
 
+            await saveDataStore();
             sendJson(response, 200, {
                 app: getAppForRole('student'),
                 role: 'student',
@@ -1063,6 +1235,7 @@ async function handleApi(request, response, pathname) {
                 return;
             }
 
+            await saveDataStore();
             sendJson(response, 200, {
                 app: getAppForRole('student'),
                 role: 'student',
@@ -1099,13 +1272,14 @@ async function handleApi(request, response, pathname) {
 
         try {
             const payload = await readJsonBody(request);
-            const validationError = submitAssignment(student, decodeURIComponent(assignmentSubmissionMatch[1]), payload);
+            const validationError = await submitAssignment(student, decodeURIComponent(assignmentSubmissionMatch[1]), payload);
 
             if (validationError) {
                 sendError(response, 400, validationError);
                 return;
             }
 
+            await saveDataStore();
             sendJson(response, 200, {
                 app: getAppForRole('student'),
                 role: 'student',
@@ -1164,6 +1338,7 @@ async function handleApi(request, response, pathname) {
                 return;
             }
 
+            await saveDataStore();
             sendJson(response, 200, {
                 ok: true,
                 sentCount: result.sentCount,
@@ -1199,6 +1374,7 @@ async function handleApi(request, response, pathname) {
                 return;
             }
 
+            await saveDataStore();
             sendJson(response, 200, {
                 ok: true,
                 teacherData: getTeacherOverview()
@@ -1256,6 +1432,7 @@ async function handleApi(request, response, pathname) {
                 });
             });
 
+            await saveDataStore();
             sendJson(response, 200, {
                 ok: true,
                 sentCount: targetStudents.length,
@@ -1350,6 +1527,18 @@ const server = http.createServer((request, response) => {
     sendStaticFile(response, url.pathname);
 });
 
-server.listen(PORT, () => {
-    console.log(`T-Study POS server running at http://127.0.0.1:${PORT}`);
+async function startServer() {
+    await loadPersistedData();
+
+    server.listen(PORT, () => {
+        const storageLabel = firebase.bucket ? 'Firebase Storage' : 'memory image storage';
+        const databaseLabel = firebase.enabled ? 'Firestore' : 'memory database';
+        console.log(`T-Study POS server running at http://127.0.0.1:${PORT}`);
+        console.log(`Data: ${databaseLabel}, Photos: ${storageLabel}`);
+    });
+}
+
+startServer().catch((error) => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
 });
